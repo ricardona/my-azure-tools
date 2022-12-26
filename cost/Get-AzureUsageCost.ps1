@@ -27,14 +27,15 @@ This script was inspired by Kristofer Liljeblad's script https://gist.github.com
 .EXAMPLE
 
 Get consumption data for the previous billing period (default)
-Get-AzureUsageCost.ps1 
+.\Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx,yyyy-yyyy-yyyy-yyyy-yyyy
 
 Get consumption data for a specified billing period
-Get-AzureUsageCost.ps1 -YearMonth = 202301
+Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx -YearMonth = 202301
 #>
 
 param(
-    [string]$YearMonth = (Get-Date).AddMonths(-1).ToString("yyyyMM")
+    [string]$YearMonth = (Get-Date).AddMonths(-1).ToString("yyyyMM"),
+    [Parameter(Mandatory=$true)][String[]] $SubscriptionIds
 )
 
 # Get Access Token
@@ -61,11 +62,7 @@ $excelFile = "./output/costoverview-$billingPeriod.xlsx"
 $billingString = "/providers/Microsoft.Billing/billingPeriods/$billingPeriod/providers"
 $usageRows = New-Object System.Collections.ArrayList
 
-$subscriptionIds = @(
-    "90e56dfa-8590-4448-8590-e0r689845921"
-)
-
-foreach ($subId in $subscriptionIds) {
+foreach ($subId in $SubscriptionIds) {
     $usageUri = "https://management.azure.com/subscriptions/$subId$billingString/Microsoft.Consumption/usageDetails?`$expand=meterDetails&api-version=2021-10-01"
 
     Write-Host "Querying Azure Usage API for subscription $subId"
@@ -99,9 +96,9 @@ $projectGroup = $reportresult | Select-Object Project, Cost |  Group-Object Proj
     New-Object -Type PSObject -Property @{
         'BillingPeriod' = $YearMonth
         'Project'       = $_.Group | Select-Object -Expand Project -First 1
-        'EURO'           = ($_.Group | Measure-Object Cost -Sum).Sum
+        'Price'           = ($_.Group | Measure-Object Cost -Sum).Sum
     }
-}  | Sort-Object EURO -Descending
+}  | Sort-Object Price -Descending
 
 # Group by rg + month
 
@@ -109,10 +106,10 @@ $rgGroup = $reportresult | Select-Object resourceGroup, Cost, ResourceLocation |
     New-Object -Type PSObject -Property @{
         'BillingPeriod'    = $YearMonth
         'ResourceGroup'    = $_.Group | Select-Object -Expand ResourceGroup -First 1
-        'EURO'              = ($_.Group | Measure-Object Cost -Sum).Sum
+        'Price'              = ($_.Group | Measure-Object Cost -Sum).Sum
         'ResourceLocation' = $_.Group | Select-Object -Expand ResourceLocation -First 1
     }
-}  | Sort-Object EURO -Descending
+}  | Sort-Object Price -Descending
 
 # Group by resourceName + month
 
@@ -120,32 +117,55 @@ $resGrouping = $reportresult | Select-Object ResourceName, ResourceGroup, Resour
     New-Object -Type PSObject -Property @{
         'BillingPeriod'    = $YearMonth
         'ResourceName'     = $_.Group | Select-Object -Expand ResourceName -First 1
-        'EURO'              = ($_.Group | Measure-Object Cost -Sum).Sum
+        'Price'              = ($_.Group | Measure-Object Cost -Sum).Sum
         'ServiceNamespace' = $_.Group  | Select-Object -Expand ConsumedService -First 1
         'ResourceLocation' = $_.Group  | Select-Object -Expand ResourceLocation -First 1
         'ResourceGroup'    = $_.Group  | Select-Object -Expand ResourceGroup -First 1
     }
-} | Sort-Object EURO -Descending
+} | Sort-Object Price -Descending
+
+# Group by ServiceNamespace + month
+
+$serviceNamespaceGrouping = $reportresult | Select-Object ResourceLocation, ConsumedService, Cost |  Group-Object ConsumedService | ForEach-Object {
+    New-Object -Type PSObject -Property @{
+        'BillingPeriod'    = $YearMonth
+        'ServiceNamespace' = $_.Group  | Select-Object -Expand ConsumedService -First 1
+        'Price'              = ($_.Group | Measure-Object Cost -Sum).Sum
+        'ResourceLocation' = $_.Group  | Select-Object -Expand ResourceLocation -First 1
+    }
+} | Sort-Object Price -Descending
+
 
 # Export to File
 
 $groupingSheet = "By project tag"
 $groupingSheet2 = "By resource group"
 $groupingSheet3 = "By resourcename"
+$groupingSheet4 = "By service namespace"
 
 $excel2 = $projectGroup | Export-Excel -WorksheetName $groupingSheet -Path $ExcelFile -AutoSize -TableName Table1 -StartRow 15 -PassThru
 $ws = $excel2.Workbook.Worksheets[$groupingSheet]
 Set-Format -Range A1  -Value "Script run at: $($Date)" -Worksheet $ws
 Set-Format -Range A4  -Value "The script covers all subscriptions" -Worksheet $ws
 Set-Format -Range A13  -Value "Cost grouped by project tag" -Worksheet $ws
+Set-Format -Range "A16:A1000" -NumberFormat "$#,##0.00" -Worksheet $ws
 Close-ExcelPackage $excel2
 
 $excel0 = $rgGroup | Export-Excel -WorksheetName $groupingSheet2 -Path $ExcelFile -AutoSize -TableName Table2 -StartRow 15 -PassThru
 $ws = $excel0.Workbook.Worksheets[$groupingSheet2]
 Set-Format -Range A13  -Value "Cost grouped by resource group" -Worksheet $ws
+Set-Format -Range "B16:B1000" -NumberFormat "$#,##0.00" -Worksheet $ws
 Close-ExcelPackage $excel0
 
 $excel3 = $resGrouping | Export-Excel -WorksheetName $groupingSheet3 -Path $ExcelFile -AutoSize -TableName Table3 -StartRow 15 -PassThru
 $ws = $excel3.Workbook.Worksheets[$groupingSheet3]
 Set-Format -Range A13  -Value "Cost grouped by resource name" -Worksheet $ws
+Set-Format -Range "D16:D1000" -NumberFormat "$#,##0.00" -Worksheet $ws
 Close-ExcelPackage $excel3
+
+$excel4 = $serviceNamespaceGrouping | Export-Excel -WorksheetName $groupingSheet4 -Path $ExcelFile -AutoSize -TableName Table4 -StartRow 15 -PassThru
+$ws = $excel4.Workbook.Worksheets[$groupingSheet4]
+Set-Format -Range A13  -Value "Cost grouped by service namespace" -Worksheet $ws
+Set-Format -Range "A16:A1000" -NumberFormat "$#,##0.00" -Worksheet $ws
+
+Close-ExcelPackage $excel4
