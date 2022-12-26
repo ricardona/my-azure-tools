@@ -17,70 +17,53 @@
 .SYNOPSIS
 The script returns monthly data from the Usage Details API https://docs.microsoft.com/en-us/rest/api/consumption/usage-details/list
 and generates excel sheets using the ImportExcel module. The API call is designed to retrieve consumption for a month.
-In turn, both raw data and monthly grouped data is grouped by the 'project' tag, resource group, and resource name. The raw script output assumes the tags
-'cost-center', 'project' and 'environment' are in place. Edit the script to suit your own environment
+In turn, both raw data and monthly grouped data is grouped by the 'project' tag, resource group, and resource name. The raw script 
+output assumes the tags 'cost-center', 'project' and 'environment' are in place. Edit the script to suit your own environment
 This script was inspired by Kristofer Liljeblad's script https://gist.github.com/krist00fer/9e8ff18ac4f22863d41aec0753ebdac4
+
+ Add the Billing Reader role at subscription level to download invoices for a subscription programmatically. 
+ The invoice API allows you to download current and past invoices for an Azure subscription.
+
 .EXAMPLE
 
-$env:ClientSecret = 'my_clientsecretin_in_rawtext"
-
 Get consumption data for the previous billing period (default)
-Get-AzureUsageCost.ps1 -ClientSecret $env:ClientSecret
+Get-AzureUsageCost.ps1 
 
 Get consumption data for a specified billing period
-Get-AzureUsageCost.ps1 -ClientSecret $env:ClientSecret -YearMonth = 201903
+Get-AzureUsageCost.ps1 -YearMonth = 202301
 #>
 
 param(
-    [string]$YearMonth = (Get-Date).AddMonths(-1).ToString("yyyyMM"),
-    [Parameter(Mandatory)]
-    [string]$ClientSecret,
-    [switch]$RunInPipeline
+    [string]$YearMonth = (Get-Date).AddMonths(-1).ToString("yyyyMM")
 )
 
-# Replace the following configuration settings
-$tenantId = "yourtenanthere.onmicrosoft.com"
-$clientId = "xxxxxxxxxxxxxxxxx"
-$subscriptionIds = @(
-    "xxx-yyy"
-    "yyy-xxx"
-)
+# Get Access Token
+#$token = Get-AzAccessToken
 
-if ($RunInPipeline) {
-    Write-Host "Installing required modules as you are running in context of a pipeline..." -ForegroundColor Yellow
-    Install-Module ImportExcel -Force
-    Import-Module ImportExcel -Force
-}
+#Get a token for the audience https://graph.microsoft.com
+$token = az account get-access-token --resource https://management.azure.com | ConvertFrom-Json | Select-Object -ExpandProperty accessToken
 
-# Login
+$authorization = 'Bearer ' + $token
 
-$loginUri = "https://login.microsoftonline.com/$tenantId/oauth2/token?api-version=1.0"
-
-$body = @{
-    grant_type    = "client_credentials"
-    resource      = "https://management.core.windows.net/"
-    client_id     = $clientId
-    client_secret = $ClientSecret
-}
-
-Write-Host "Authenticating" 
-
-$loginResponse = Invoke-RestMethod $loginUri -Method Post -Body $body
-$authorization = $loginResponse.token_type + ' ' + $loginResponse.access_token
 # Use the same header in all the calls, so save authorization in a header dictionary
 
 $headers = @{
-    authorization = $authorization
+    'Authorization' = $authorization
+    "Content-Type"  = 'application/json'
 }
 $ErrorActionPreference = "Continue"
 
 # Usage Details API
 
-$Date = (Get-Date -AsUTC).ToString("yyyy-MM-dd-HH.mm.ssZ")
+$Date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd-HH.mm.ssZ")
 $billingPeriod = $YearMonth + "01"
 $excelFile = "./output/costoverview-$billingPeriod.xlsx"
 $billingString = "/providers/Microsoft.Billing/billingPeriods/$billingPeriod/providers"
 $usageRows = New-Object System.Collections.ArrayList
+
+$subscriptionIds = @(
+    "90e56dfa-8590-4448-8590-e0r689845921"
+)
 
 foreach ($subId in $subscriptionIds) {
     $usageUri = "https://management.azure.com/subscriptions/$subId$billingString/Microsoft.Consumption/usageDetails?`$expand=meterDetails&api-version=2021-10-01"
@@ -88,8 +71,7 @@ foreach ($subId in $subscriptionIds) {
     Write-Host "Querying Azure Usage API for subscription $subId"
 
     do {
-        Write-Host "."
-        $usageResult = Invoke-RestMethod $usageUri -Headers $headers -ContentType "application/json"
+        $usageResult = Invoke-RestMethod $usageUri -Headers $headers
 
         foreach ($usageRow in $usageResult.value) {
             $usageRows.Add($usageRow) > $null
@@ -117,9 +99,9 @@ $projectGroup = $reportresult | Select-Object Project, Cost |  Group-Object Proj
     New-Object -Type PSObject -Property @{
         'BillingPeriod' = $YearMonth
         'Project'       = $_.Group | Select-Object -Expand Project -First 1
-        'NOK'           = ($_.Group | Measure-Object Cost -Sum).Sum
+        'EURO'           = ($_.Group | Measure-Object Cost -Sum).Sum
     }
-}  | Sort-Object NOK -Descending
+}  | Sort-Object EURO -Descending
 
 # Group by rg + month
 
@@ -127,10 +109,10 @@ $rgGroup = $reportresult | Select-Object resourceGroup, Cost, ResourceLocation |
     New-Object -Type PSObject -Property @{
         'BillingPeriod'    = $YearMonth
         'ResourceGroup'    = $_.Group | Select-Object -Expand ResourceGroup -First 1
-        'NOK'              = ($_.Group | Measure-Object Cost -Sum).Sum
+        'EURO'              = ($_.Group | Measure-Object Cost -Sum).Sum
         'ResourceLocation' = $_.Group | Select-Object -Expand ResourceLocation -First 1
     }
-}  | Sort-Object NOK -Descending
+}  | Sort-Object EURO -Descending
 
 # Group by resourceName + month
 
@@ -138,38 +120,32 @@ $resGrouping = $reportresult | Select-Object ResourceName, ResourceGroup, Resour
     New-Object -Type PSObject -Property @{
         'BillingPeriod'    = $YearMonth
         'ResourceName'     = $_.Group | Select-Object -Expand ResourceName -First 1
-        'NOK'              = ($_.Group | Measure-Object Cost -Sum).Sum
+        'EURO'              = ($_.Group | Measure-Object Cost -Sum).Sum
         'ServiceNamespace' = $_.Group  | Select-Object -Expand ConsumedService -First 1
         'ResourceLocation' = $_.Group  | Select-Object -Expand ResourceLocation -First 1
         'ResourceGroup'    = $_.Group  | Select-Object -Expand ResourceGroup -First 1
     }
-} | Sort-Object NOK -Descending
+} | Sort-Object EURO -Descending
 
 # Export to File
 
-$xlParams = @{WorkSheet = $ws; Bold = $true; FontSize = 16 }
-$rawDataSheet = "Raw consumption data"
 $groupingSheet = "By project tag"
 $groupingSheet2 = "By resource group"
 $groupingSheet3 = "By resourcename"
 
 $excel2 = $projectGroup | Export-Excel -WorksheetName $groupingSheet -Path $ExcelFile -AutoSize -TableName Table1 -StartRow 15 -PassThru
 $ws = $excel2.Workbook.Worksheets[$groupingSheet]
-Set-Format -Range A1  -Value "Script run at: $($Date)" @xlParams -Worksheet $ws
-Set-Format -Range A4  -Value "The script covers all subscriptions" @xlParams -Worksheet $ws
-Set-Format -Range A13  -Value "Cost grouped by project tag" @xlParams -Worksheet $ws
+Set-Format -Range A1  -Value "Script run at: $($Date)" -Worksheet $ws
+Set-Format -Range A4  -Value "The script covers all subscriptions" -Worksheet $ws
+Set-Format -Range A13  -Value "Cost grouped by project tag" -Worksheet $ws
 Close-ExcelPackage $excel2
 
 $excel0 = $rgGroup | Export-Excel -WorksheetName $groupingSheet2 -Path $ExcelFile -AutoSize -TableName Table2 -StartRow 15 -PassThru
 $ws = $excel0.Workbook.Worksheets[$groupingSheet2]
-Set-Format -Range A13  -Value "Cost grouped by resource group" @xlParams -Worksheet $ws
+Set-Format -Range A13  -Value "Cost grouped by resource group" -Worksheet $ws
 Close-ExcelPackage $excel0
 
 $excel3 = $resGrouping | Export-Excel -WorksheetName $groupingSheet3 -Path $ExcelFile -AutoSize -TableName Table3 -StartRow 15 -PassThru
 $ws = $excel3.Workbook.Worksheets[$groupingSheet3]
-Set-Format -Range A13  -Value "Cost grouped by resource name" @xlParams -Worksheet $ws
+Set-Format -Range A13  -Value "Cost grouped by resource name" -Worksheet $ws
 Close-ExcelPackage $excel3
-
-$excel1 = $reportResult | Export-Excel -WorksheetName $rawDataSheet -Path $ExcelFile -AutoSize -TableName Table4 -StartRow 15 -PassThru
-$ws = $excel1.Workbook.Worksheets[$rawDataSheet]
-Close-ExcelPackage $excel1
