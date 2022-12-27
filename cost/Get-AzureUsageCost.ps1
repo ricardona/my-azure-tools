@@ -29,6 +29,9 @@ This script was inspired by Kristofer Liljeblad's script https://gist.github.com
 First, connect to Azure
   az login --use-device-code
 
+Copy and Paste the following command to install the required package ImportExcel using PowerShellGet
+  Install-Module -Name ImportExcel  
+
 Get consumption data for the previous billing period (default)
   .\Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx,yyyy-yyyy-yyyy-yyyy-yyyy
 
