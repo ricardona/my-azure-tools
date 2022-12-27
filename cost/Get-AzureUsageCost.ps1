@@ -26,11 +26,14 @@ This script was inspired by Kristofer Liljeblad's script https://gist.github.com
 
 .EXAMPLE
 
+First, connect to Azure
+  az login --use-device-code
+
 Get consumption data for the previous billing period (default)
-.\Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx,yyyy-yyyy-yyyy-yyyy-yyyy
+  .\Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx,yyyy-yyyy-yyyy-yyyy-yyyy
 
 Get consumption data for a specified billing period
-Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx -YearMonth = 202301
+  Get-AzureUsageCost.ps1 -SubscriptionIds xxxxx-xxxx-xxxx-xxxx-xxxxxxx -YearMonth = 202301
 #>
 
 param(
@@ -138,34 +141,35 @@ $serviceNamespaceGrouping = $reportresult | Select-Object ResourceLocation, Cons
 
 # Export to File
 
-$groupingSheet = "By project tag"
-$groupingSheet2 = "By resource group"
-$groupingSheet3 = "By resourcename"
-$groupingSheet4 = "By service namespace"
+$projectTagLabel = "By project tag"
+$resourceGroupLabel = "By resource group"
+$resourceNameLabel = "By resourcename"
+$serviceNamespaceLabel = "By service namespace"
+$moneyFormat = "$#,##0.00"
 
-$excel2 = $projectGroup | Export-Excel -WorksheetName $groupingSheet -Path $ExcelFile -AutoSize -TableName Table1 -StartRow 15 -PassThru
-$ws = $excel2.Workbook.Worksheets[$groupingSheet]
+$totalProjectWS = $projectGroup | Export-Excel -WorksheetName $projectTagLabel -Path $ExcelFile -AutoSize -TableName Table1 -StartRow 15 -PassThru
+$ws = $totalProjectWS.Workbook.Worksheets[$projectTagLabel]
 Set-Format -Range A1  -Value "Script run at: $($Date)" -Worksheet $ws
-Set-Format -Range A4  -Value "The script covers all subscriptions" -Worksheet $ws
+Set-Format -Range A4  -Value "The script covers all subscriptions $SubscriptionIds" -Worksheet $ws
 Set-Format -Range A13  -Value "Cost grouped by project tag" -Worksheet $ws
-Set-Format -Range "A16:A1000" -NumberFormat "$#,##0.00" -Worksheet $ws
-Close-ExcelPackage $excel2
+Set-Format -Range "A16:A1000" -NumberFormat $moneyFormat -Worksheet $ws
+Close-ExcelPackage $totalProjectWS
 
-$excel0 = $rgGroup | Export-Excel -WorksheetName $groupingSheet2 -Path $ExcelFile -AutoSize -TableName Table2 -StartRow 15 -PassThru
-$ws = $excel0.Workbook.Worksheets[$groupingSheet2]
+$resourceGroupWS = $rgGroup | Export-Excel -WorksheetName $resourceGroupLabel -Path $ExcelFile -AutoSize -TableName Table2 -StartRow 15 -PassThru
+$ws = $resourceGroupWS.Workbook.Worksheets[$resourceGroupLabel]
 Set-Format -Range A13  -Value "Cost grouped by resource group" -Worksheet $ws
-Set-Format -Range "B16:B1000" -NumberFormat "$#,##0.00" -Worksheet $ws
-Close-ExcelPackage $excel0
+Set-Format -Range "B16:B1000" -NumberFormat $moneyFormat -Worksheet $ws
+Close-ExcelPackage $resourceGroupWS
 
-$excel3 = $resGrouping | Export-Excel -WorksheetName $groupingSheet3 -Path $ExcelFile -AutoSize -TableName Table3 -StartRow 15 -PassThru
-$ws = $excel3.Workbook.Worksheets[$groupingSheet3]
+$resourceNameWS = $resGrouping | Export-Excel -WorksheetName $resourceNameLabel -Path $ExcelFile -AutoSize -TableName Table3 -StartRow 15 -PassThru
+$ws = $resourceNameWS.Workbook.Worksheets[$resourceNameLabel]
 Set-Format -Range A13  -Value "Cost grouped by resource name" -Worksheet $ws
-Set-Format -Range "D16:D1000" -NumberFormat "$#,##0.00" -Worksheet $ws
-Close-ExcelPackage $excel3
+Set-Format -Range "D16:D1000" -NumberFormat $moneyFormat -Worksheet $ws
+Close-ExcelPackage $resourceNameWS
 
-$excel4 = $serviceNamespaceGrouping | Export-Excel -WorksheetName $groupingSheet4 -Path $ExcelFile -AutoSize -TableName Table4 -StartRow 15 -PassThru
-$ws = $excel4.Workbook.Worksheets[$groupingSheet4]
+$serviceNamespaceWS = $serviceNamespaceGrouping | Export-Excel -WorksheetName $serviceNamespaceLabel -Path $ExcelFile -AutoSize -TableName Table4 -StartRow 15 -PassThru
+$ws = $serviceNamespaceWS.Workbook.Worksheets[$serviceNamespaceLabel]
 Set-Format -Range A13  -Value "Cost grouped by service namespace" -Worksheet $ws
-Set-Format -Range "A16:A1000" -NumberFormat "$#,##0.00" -Worksheet $ws
+Set-Format -Range "A16:A1000" -NumberFormat $moneyFormat -Worksheet $ws
 
-Close-ExcelPackage $excel4
+Close-ExcelPackage $serviceNamespaceWS
